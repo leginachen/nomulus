@@ -15,6 +15,7 @@
 package google.registry.beam.spec11;
 
 import static com.google.common.truth.Truth.assertThat;
+import static google.registry.persistence.transaction.TransactionManagerFactory.jpaTm;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -23,8 +24,13 @@ import static org.mockito.Mockito.withSettings;
 
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.io.CharStreams;
 import google.registry.beam.spec11.SafeBrowsingTransforms.EvaluateSafeBrowsingFn;
+import google.registry.model.reporting.Spec11ThreatMatch;
+import google.registry.model.reporting.Spec11ThreatMatch.ThreatType;
+import google.registry.persistence.VKey;
+import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.testing.FakeClock;
 import google.registry.testing.FakeSleeper;
 import google.registry.util.GoogleCredentialsBundle;
@@ -45,6 +51,9 @@ import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
 import org.apache.beam.sdk.testing.TestPipeline;
 import org.apache.beam.sdk.transforms.Create;
+import org.apache.beam.sdk.transforms.DoFn;
+import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.http.ProtocolVersion;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -53,6 +62,8 @@ import org.apache.http.entity.BasicHttpEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.message.BasicStatusLine;
 import org.joda.time.DateTime;
+import org.joda.time.LocalDate;
+import org.joda.time.format.ISODateTimeFormat;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -71,11 +82,13 @@ import org.mockito.stubbing.Answer;
 public class Spec11PipelineTest {
 
   private static PipelineOptions pipelineOptions;
+  private static JpaTransactionManager jpaTm;
 
   @BeforeClass
   public static void initializePipelineOptions() {
     pipelineOptions = PipelineOptionsFactory.create();
     pipelineOptions.setRunner(DirectRunner.class);
+    jpaTm = jpaTm();
   }
 
   @Rule public final transient TestPipeline p = TestPipeline.fromOptions(pipelineOptions);
@@ -94,6 +107,7 @@ public class Spec11PipelineTest {
             beamTempFolder.getAbsolutePath() + "/staging",
             beamTempFolder.getAbsolutePath() + "/templates/invoicing",
             tempFolder.getRoot().getAbsolutePath(),
+            jpaTm,
             GoogleCredentialsBundle.create(GoogleCredentials.create(null)),
             retrier);
   }
@@ -143,7 +157,7 @@ public class Spec11PipelineTest {
 
     // Apply input and evaluation transforms
     PCollection<Subdomain> input = p.apply(Create.of(inputRows));
-    spec11Pipeline.evaluateUrlHealth(input, evalFn, StaticValueProvider.of("2018-06-01"));
+    spec11Pipeline.evaluateUrlHealth(input, evalFn, StaticValueProvider.of("2018-06-01"), jpaTm);
     p.run();
 
     // Verify header and 4 threat matches for 3 registrars are found
@@ -200,6 +214,69 @@ public class Spec11PipelineTest {
                 .put("fullyQualifiedDomainName", "222.com")
                 .put("threatType", "MALWARE")
                 .toString());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void testSpec11ThreatMatchPersistence() throws Exception {
+    // Establish mocks for testing
+    ImmutableList<Subdomain> inputRows = getInputDomains();
+    CloseableHttpClient httpClient = mock(CloseableHttpClient.class, withSettings().serializable());
+
+    // Return a mock HttpResponse that returns a JSON response based on the request.
+    when(httpClient.execute(any(HttpPost.class))).thenAnswer(new HttpResponder());
+
+    EvaluateSafeBrowsingFn evalFn =
+        new EvaluateSafeBrowsingFn(
+            StaticValueProvider.of("apikey"),
+            new Retrier(new FakeSleeper(new FakeClock()), 3),
+            (Serializable & Supplier) () -> httpClient);
+
+    // Apply input and evaluation transforms
+    PCollection<Subdomain> input = p.apply(Create.of(inputRows));
+    LocalDate date = LocalDate.parse("2020-06-10", ISODateTimeFormat.date());
+    spec11Pipeline.evaluateUrlHealth(input, evalFn, StaticValueProvider.of("2020-06-10"), jpaTm);
+    p.run();
+
+    // Create Spec11ThreatMatch objects and test their persistence
+    PCollection<KV<Subdomain, ThreatMatch>> subdomains =
+        input.apply("Run through SafeBrowsing API", ParDo.of(evalFn));
+    subdomains.apply(
+        ParDo.of(
+            new DoFn<KV<Subdomain, ThreatMatch>, Void>() {
+              @ProcessElement
+              public void processElement(ProcessContext context) {
+                Spec11ThreatMatch threat =
+                    createSpec11ThreatMatch(
+                        context.element().getKey(), context.element().getValue(), date);
+                VKey<Spec11ThreatMatch> threatVKey =
+                    VKey.createSql(Spec11ThreatMatch.class, threat.getId());
+                Spec11ThreatMatch persistedThreat =
+                    jpaTm().transact(() -> jpaTm().load(threatVKey));
+                testThreatsEqual(threat, persistedThreat);
+              }
+            }));
+  }
+
+  /* Check that all fields are equal except ID (we cannot set the ID field here because it isn't public. */
+  private void testThreatsEqual(Spec11ThreatMatch threat, Spec11ThreatMatch persistedThreat) {
+    assertThat(threat.getCheckDate()).isEqualTo(persistedThreat.getCheckDate());
+    assertThat(threat.getDomainName()).isEqualTo(persistedThreat.getDomainName());
+    assertThat(threat.getDomainRepoId()).isEqualTo(persistedThreat.getDomainRepoId());
+    assertThat(threat.getRegistrarId()).isEqualTo(persistedThreat.getRegistrarId());
+    assertThat(threat.getThreatTypes()).isEqualTo(persistedThreat.getThreatTypes());
+    assertThat(threat.getTld()).isEqualTo(persistedThreat.getTld());
+  }
+
+  private Spec11ThreatMatch createSpec11ThreatMatch(
+      Subdomain subdomain, ThreatMatch threatMatch, LocalDate date) {
+    return new Spec11ThreatMatch.Builder()
+        .setThreatTypes(ImmutableSet.of(ThreatType.valueOf(threatMatch.threatType())))
+        .setCheckDate(date)
+        .setDomainName(subdomain.domainName())
+        .setDomainRepoId(subdomain.domainRepoId())
+        .setRegistrarId(subdomain.registrarId())
+        .build();
   }
 
   /**
