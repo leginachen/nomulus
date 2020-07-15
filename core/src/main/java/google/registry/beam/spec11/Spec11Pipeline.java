@@ -208,7 +208,7 @@ public class Spec11Pipeline implements Serializable {
                         .setDomainRepoId(context.element().getKey().domainRepoId())
                         .setRegistrarId(context.element().getKey().registrarId())
                         .build();
-                jpaTm.saveNew(threatMatch);
+                jpaTm.transact(() -> jpaTm.saveNew(threatMatch));
               }
             }));
 

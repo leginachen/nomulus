@@ -18,6 +18,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static google.registry.persistence.transaction.TransactionManagerFactory.jpaTm;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
@@ -81,14 +82,23 @@ import org.mockito.stubbing.Answer;
 @RunWith(JUnit4.class)
 public class Spec11PipelineTest {
 
+  private static class SerializableFunction implements Answer<Void>, Serializable {
+
+    public Void answer(InvocationOnMock invocation) {
+      Runnable runnable = (Runnable) invocation.getArguments()[0];
+      runnable.run();
+      return null;
+    }
+  }
+
   private static PipelineOptions pipelineOptions;
-  private static JpaTransactionManager jpaTm;
+  private static JpaTransactionManager mockJpaTm;
+  private static Spec11ThreatMatch threatMatch;
 
   @BeforeClass
-  public static void initializePipelineOptions() {
+  public static void setUp() {
     pipelineOptions = PipelineOptionsFactory.create();
     pipelineOptions.setRunner(DirectRunner.class);
-    jpaTm = jpaTm();
   }
 
   @Rule public final transient TestPipeline p = TestPipeline.fromOptions(pipelineOptions);
@@ -101,13 +111,19 @@ public class Spec11PipelineTest {
   @Before
   public void initializePipeline() throws IOException {
     File beamTempFolder = tempFolder.newFolder();
+    mockJpaTm = mock(JpaTransactionManager.class, withSettings().serializable());
+
+    doAnswer(new SerializableFunction())
+        .when(mockJpaTm)
+        .transact(any(Runnable.class));
+
     spec11Pipeline =
         new Spec11Pipeline(
             "test-project",
             beamTempFolder.getAbsolutePath() + "/staging",
             beamTempFolder.getAbsolutePath() + "/templates/invoicing",
             tempFolder.getRoot().getAbsolutePath(),
-            jpaTm,
+            mockJpaTm,
             GoogleCredentialsBundle.create(GoogleCredentials.create(null)),
             retrier);
   }
@@ -144,20 +160,22 @@ public class Spec11PipelineTest {
   public void testEndToEndPipeline_generatesExpectedFiles() throws Exception {
     // Establish mocks for testing
     ImmutableList<Subdomain> inputRows = getInputDomains();
-    CloseableHttpClient httpClient = mock(CloseableHttpClient.class, withSettings().serializable());
+    CloseableHttpClient mockHttpClient =
+        mock(CloseableHttpClient.class, withSettings().serializable());
 
     // Return a mock HttpResponse that returns a JSON response based on the request.
-    when(httpClient.execute(any(HttpPost.class))).thenAnswer(new HttpResponder());
+    when(mockHttpClient.execute(any(HttpPost.class))).thenAnswer(new HttpResponder());
 
     EvaluateSafeBrowsingFn evalFn =
         new EvaluateSafeBrowsingFn(
             StaticValueProvider.of("apikey"),
             new Retrier(new FakeSleeper(new FakeClock()), 3),
-            (Serializable & Supplier) () -> httpClient);
+            (Serializable & Supplier) () -> mockHttpClient);
 
     // Apply input and evaluation transforms
     PCollection<Subdomain> input = p.apply(Create.of(inputRows));
-    spec11Pipeline.evaluateUrlHealth(input, evalFn, StaticValueProvider.of("2018-06-01"), jpaTm);
+    spec11Pipeline.evaluateUrlHealth(
+        input, evalFn, StaticValueProvider.of("2018-06-01"), mockJpaTm);
     p.run();
 
     // Verify header and 4 threat matches for 3 registrars are found
@@ -235,7 +253,8 @@ public class Spec11PipelineTest {
     // Apply input and evaluation transforms
     PCollection<Subdomain> input = p.apply(Create.of(inputRows));
     LocalDate date = LocalDate.parse("2020-06-10", ISODateTimeFormat.date());
-    spec11Pipeline.evaluateUrlHealth(input, evalFn, StaticValueProvider.of("2020-06-10"), jpaTm);
+    spec11Pipeline.evaluateUrlHealth(
+        input, evalFn, StaticValueProvider.of("2020-06-10"), mockJpaTm);
     p.run();
 
     // Create Spec11ThreatMatch objects and test their persistence
@@ -253,19 +272,10 @@ public class Spec11PipelineTest {
                     VKey.createSql(Spec11ThreatMatch.class, threat.getId());
                 Spec11ThreatMatch persistedThreat =
                     jpaTm().transact(() -> jpaTm().load(threatVKey));
-                testThreatsEqual(threat, persistedThreat);
+                threat = threat.asBuilder().setId(persistedThreat.getId()).build();
+                assertThat(threat).isEqualTo(persistedThreat);
               }
             }));
-  }
-
-  /* Check that all fields are equal except ID (we cannot set the ID field here because it isn't public. */
-  private void testThreatsEqual(Spec11ThreatMatch threat, Spec11ThreatMatch persistedThreat) {
-    assertThat(threat.getCheckDate()).isEqualTo(persistedThreat.getCheckDate());
-    assertThat(threat.getDomainName()).isEqualTo(persistedThreat.getDomainName());
-    assertThat(threat.getDomainRepoId()).isEqualTo(persistedThreat.getDomainRepoId());
-    assertThat(threat.getRegistrarId()).isEqualTo(persistedThreat.getRegistrarId());
-    assertThat(threat.getThreatTypes()).isEqualTo(persistedThreat.getThreatTypes());
-    assertThat(threat.getTld()).isEqualTo(persistedThreat.getTld());
   }
 
   private Spec11ThreatMatch createSpec11ThreatMatch(
