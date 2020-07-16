@@ -69,6 +69,32 @@ import org.json.JSONObject;
  */
 public class Spec11Pipeline implements Serializable {
 
+  public static class CreateAndPersistThreatMatchesFn extends DoFn<KV<Subdomain, ThreatMatch>, Void> {
+    private final String date;
+    private final JpaTransactionManager jpaTm;
+
+    public CreateAndPersistThreatMatchesFn(String date, JpaTransactionManager jpaTm) {
+      this.date = date;
+      this.jpaTm = jpaTm;
+    }
+
+    @ProcessElement
+    public void processElement(ProcessContext context) {
+      // create the Spec11ThreatMatch from Subdomain and ThreatMatch
+      Spec11ThreatMatch threatMatch =
+          new Spec11ThreatMatch.Builder()
+              .setThreatTypes(
+                  ImmutableSet.of(
+                      ThreatType.valueOf(context.element().getValue().threatType())))
+              .setCheckDate(LocalDate.parse(date, ISODateTimeFormat.date()))
+              .setDomainName(context.element().getKey().domainName())
+              .setDomainRepoId(context.element().getKey().domainRepoId())
+              .setRegistrarId(context.element().getKey().registrarId())
+              .build();
+      jpaTm.transact(() -> jpaTm.saveNew(threatMatch));
+    }
+  }
+
   /**
    * Returns the subdirectory spec11 reports reside in for a given local date in yyyy-MM-dd format.
    *
@@ -173,8 +199,8 @@ public class Spec11Pipeline implements Serializable {
     evaluateUrlHealth(
         domains,
         new EvaluateSafeBrowsingFn(options.getSafeBrowsingApiKey(), retrier),
-        options.getDate(),
-        jpaTm);
+        new CreateAndPersistThreatMatchesFn(options.getDate().toString(), jpaTm),
+        options.getDate());
     p.run();
   }
 
@@ -186,31 +212,13 @@ public class Spec11Pipeline implements Serializable {
   void evaluateUrlHealth(
       PCollection<Subdomain> domains,
       EvaluateSafeBrowsingFn evaluateSafeBrowsingFn,
-      ValueProvider<String> dateProvider,
-      JpaTransactionManager jpaTm) {
+      CreateAndPersistThreatMatchesFn createAndPersistFn,
+      ValueProvider<String> dateProvider) {
 
     /* Store ThreatMatch objects in SQL. */
     PCollection<KV<Subdomain, ThreatMatch>> subdomainsSql =
         domains.apply("Run through SafeBrowsing API", ParDo.of(evaluateSafeBrowsingFn));
-    subdomainsSql.apply(
-        ParDo.of(
-            new DoFn<KV<Subdomain, ThreatMatch>, Void>() {
-              @ProcessElement
-              public void processElement(ProcessContext context) {
-                // create the Spec11ThreatMatch from Subdomain and ThreatMatch
-                Spec11ThreatMatch threatMatch =
-                    new Spec11ThreatMatch.Builder()
-                        .setThreatTypes(
-                            ImmutableSet.of(
-                                ThreatType.valueOf(context.element().getValue().threatType())))
-                        .setCheckDate(LocalDate.parse(dateProvider.get(), ISODateTimeFormat.date()))
-                        .setDomainName(context.element().getKey().domainName())
-                        .setDomainRepoId(context.element().getKey().domainRepoId())
-                        .setRegistrarId(context.element().getKey().registrarId())
-                        .build();
-                jpaTm.transact(() -> jpaTm.saveNew(threatMatch));
-              }
-            }));
+    subdomainsSql.apply("Create and persist Spec11ThreatMatches", ParDo.of(createAndPersistFn));
 
     /* Store ThreatMatch objects in JSON. */
     PCollection<KV<Subdomain, ThreatMatch>> subdomainsJson =
