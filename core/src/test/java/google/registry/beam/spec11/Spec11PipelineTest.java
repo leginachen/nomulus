@@ -18,10 +18,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
@@ -44,7 +41,9 @@ import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Supplier;
 import org.apache.beam.runners.direct.DirectRunner;
 import org.apache.beam.sdk.options.PipelineOptions;
@@ -70,7 +69,6 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
@@ -79,6 +77,7 @@ import org.mockito.stubbing.Answer;
 public class Spec11PipelineTest {
 
   private static class SerializableTransactAnswer implements Answer<Void>, Serializable {
+    @Override
     public Void answer(InvocationOnMock invocation) {
       Runnable runnable = (Runnable) invocation.getArguments()[0];
       runnable.run();
@@ -86,8 +85,31 @@ public class Spec11PipelineTest {
     }
   }
 
+  /* Since saveList is a static list, it is shared among all instances of this class and
+  the other tests that call saveNew() may overwrite the value we want. To resolve this,
+  a new bad domain is created for the purpose of testing in testEvaluateUrlHealthSql()
+  and we only store a Spec11ThreatMatch in saveList if its domain name is the one we created.*/
+  private static class SerializableSaveNewAnswer implements Answer<Void>, Serializable {
+    @Override
+    public Void answer(InvocationOnMock invocation) {
+      Spec11ThreatMatch threat = invocation.getArgument(0, Spec11ThreatMatch.class);
+      if (threat.getDomainName().equals("testprocesselement.com")) {
+        savedList.add(threat);
+      }
+      return null;
+    }
+  }
+
   private static PipelineOptions pipelineOptions;
   private static JpaTransactionManager mockJpaTm;
+
+  /**
+   * The Spec11Pipeline serializes and deserializes its input, so the JpaTransactionManager it uses
+   * is a different object from the one passed into it. So, instead of using an ArgumentCaptor to
+   * capture the Spec11ThreatMatch passed into saveNew(), we store the Spec11ThreatMatch in this
+   * list to verify its contents.
+   */
+  private static List<Spec11ThreatMatch> savedList = new ArrayList<>();
 
   @BeforeClass
   public static void setUp() {
@@ -111,7 +133,7 @@ public class Spec11PipelineTest {
     File beamTempFolder = tempFolder.newFolder();
     mockJpaTm = mock(JpaTransactionManager.class, withSettings().serializable());
     doAnswer(new SerializableTransactAnswer()).when(mockJpaTm).transact(any(Runnable.class));
-    doNothing().when(mockJpaTm).saveNew(any(Spec11ThreatMatch.class));
+    doAnswer(new SerializableSaveNewAnswer()).when(mockJpaTm).saveNew(any(Spec11ThreatMatch.class));
 
     spec11Pipeline =
         new Spec11Pipeline(
@@ -125,7 +147,7 @@ public class Spec11PipelineTest {
   }
 
   private static final ImmutableList<String> BAD_DOMAINS =
-      ImmutableList.of("111.com", "222.com", "444.com", "no-email.com");
+      ImmutableList.of("111.com", "222.com", "444.com", "no-email.com", "testprocesselement.com");
 
   private ImmutableList<Subdomain> getInputDomainsJson() {
     ImmutableList.Builder<Subdomain> subdomainsBuilder = new ImmutableList.Builder<>();
@@ -232,10 +254,11 @@ public class Spec11PipelineTest {
 
   @Test
   @SuppressWarnings("unchecked")
-  public void testSpec11ThreatMatchPersistence() throws Exception {
+  public void testEvaluateUrlHealthSql() throws Exception {
     // Create one bad Subdomain to test with evaluateUrlHealth
     Subdomain badDomain =
-        Subdomain.create("no-email.com", "theDomain", "theRegistrar", "fake@theRegistrar.com");
+        Subdomain.create(
+            "testprocesselement.com", "theDomain", "theRegistrar", "fake@theRegistrar.com");
 
     // Establish a mock HttpResponse that returns a JSON response based on the request.
     CloseableHttpClient mockHttpClient =
@@ -248,10 +271,6 @@ public class Spec11PipelineTest {
             new Retrier(new FakeSleeper(new FakeClock()), 3),
             (Serializable & Supplier) () -> mockHttpClient);
 
-    ArgumentCaptor<Spec11ThreatMatch> threatCaptor =
-        ArgumentCaptor.forClass(Spec11ThreatMatch.class);
-    verify(mockJpaTm).saveNew(threatCaptor.capture());
-
     // Apply input and evaluation transforms
     PCollection<Subdomain> input = p.apply(Create.of(badDomain));
     spec11Pipeline.evaluateUrlHealth(
@@ -259,15 +278,8 @@ public class Spec11PipelineTest {
     p.run();
 
     // Capture the Spec11ThreatMatch that was persisted
-    Spec11ThreatMatch persistedThreat = threatCaptor.getValue();
-
-    // Verify that the domain names of threats and persistedThreats are equal
-    String badDomainName = badDomain.domainName();
-    String persistedDomainName = persistedThreat.getDomainName();
-    assertThat(badDomainName).isEqualTo(persistedDomainName);
-
-    // Verify that jpaTm.transact() was called one time.
-    verify(mockJpaTm, times(1)).transact(any(Runnable.class));
+    Spec11ThreatMatch persistedThreat = savedList.get(0);
+    assertThat(badDomain.domainName()).isEqualTo(persistedThreat.getDomainName());
   }
 
   /**
