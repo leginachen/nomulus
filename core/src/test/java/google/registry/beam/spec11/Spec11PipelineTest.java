@@ -18,7 +18,6 @@ import static com.google.common.truth.Truth.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -30,7 +29,6 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import google.registry.beam.spec11.SafeBrowsingTransforms.EvaluateSafeBrowsingFn;
-import google.registry.beam.spec11.Spec11Pipeline.CreateAndPersistThreatMatchesFn;
 import google.registry.model.reporting.Spec11ThreatMatch;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.testing.AppEngineRule;
@@ -47,12 +45,10 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.Comparator;
-import java.util.List;
 import java.util.function.Supplier;
 import org.apache.beam.runners.direct.DirectRunner;
 import org.apache.beam.sdk.options.PipelineOptions;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.beam.sdk.options.ValueProvider;
 import org.apache.beam.sdk.options.ValueProvider.StaticValueProvider;
 import org.apache.beam.sdk.testing.TestPipeline;
 import org.apache.beam.sdk.transforms.Create;
@@ -64,8 +60,6 @@ import org.apache.http.entity.BasicHttpEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.message.BasicStatusLine;
 import org.joda.time.DateTime;
-import org.joda.time.LocalDate;
-import org.joda.time.format.ISODateTimeFormat;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -94,7 +88,6 @@ public class Spec11PipelineTest {
 
   private static PipelineOptions pipelineOptions;
   private static JpaTransactionManager mockJpaTm;
-  private static int numTestDomainsForPersistence = 5;
 
   @BeforeClass
   public static void setUp() {
@@ -175,13 +168,10 @@ public class Spec11PipelineTest {
             new Retrier(new FakeSleeper(new FakeClock()), 3),
             (Serializable & Supplier) () -> mockHttpClient);
 
-    CreateAndPersistThreatMatchesFn createAndPersistFn =
-        new CreateAndPersistThreatMatchesFn("2018-06-01", mockJpaTm);
-
     // Apply input and evaluation transforms
     PCollection<Subdomain> input = p.apply(Create.of(inputRows));
     spec11Pipeline.evaluateUrlHealth(
-        input, evalFn, createAndPersistFn, StaticValueProvider.of("2018-06-01"));
+        input, evalFn, StaticValueProvider.of("2018-06-01"), mockJpaTm);
     p.run();
 
     // Verify header and 4 threat matches for 3 registrars are found
@@ -240,26 +230,16 @@ public class Spec11PipelineTest {
                 .toString());
   }
 
-  /* Creates an ImmutableList of domains of size numTestDomainsForPersistence for testing the persistence of {@link Spec11ThreatMatch}. */
-  private ImmutableList<Subdomain> getInputDomainsPersistence() {
-    ImmutableList.Builder<Subdomain> subdomainsBuilder = new ImmutableList.Builder<>();
-    for (int i = 0; i < numTestDomainsForPersistence; i++) {
-      subdomainsBuilder.add(
-          Subdomain.create(
-              String.format("%s.com", i), "theDomain", "theRegistrar", "fake@theRegistrar.com"));
-    }
-    return subdomainsBuilder.build();
-  }
-
   @Test
   @SuppressWarnings("unchecked")
   public void testSpec11ThreatMatchPersistence() throws Exception {
-    // Establish mocks for testing
-    ImmutableList<Subdomain> inputRows = getInputDomainsPersistence();
+    // Create one bad Subdomain to test with evaluateUrlHealth
+    Subdomain badDomain =
+        Subdomain.create("no-email.com", "theDomain", "theRegistrar", "fake@theRegistrar.com");
+
+    // Establish a mock HttpResponse that returns a JSON response based on the request.
     CloseableHttpClient mockHttpClient =
         mock(CloseableHttpClient.class, withSettings().serializable());
-
-    // Return a mock HttpResponse that returns a JSON response based on the request.
     when(mockHttpClient.execute(any(HttpPost.class))).thenAnswer(new HttpResponder());
 
     EvaluateSafeBrowsingFn evalFn =
@@ -268,31 +248,26 @@ public class Spec11PipelineTest {
             new Retrier(new FakeSleeper(new FakeClock()), 3),
             (Serializable & Supplier) () -> mockHttpClient);
 
-    CreateAndPersistThreatMatchesFn createAndPersistFn =
-        new CreateAndPersistThreatMatchesFn("2018-06-01", mockJpaTm);
-
-    // Apply input and evaluation transforms
-    PCollection<Subdomain> input = p.apply(Create.of(inputRows));
-    spec11Pipeline.evaluateUrlHealth(
-        input, evalFn, createAndPersistFn, StaticValueProvider.of("2020-06-10"));
-    p.run();
-
-    // Capture the Spec11ThreatMatch that was persisted
     ArgumentCaptor<Spec11ThreatMatch> threatCaptor =
         ArgumentCaptor.forClass(Spec11ThreatMatch.class);
     verify(mockJpaTm).saveNew(threatCaptor.capture());
-    List<Spec11ThreatMatch> persistedThreats = threatCaptor.getAllValues();
 
-    // // Verify that the domain names of threats and persistedThreats are equal
-    for (int i = 0; i < numTestDomainsForPersistence; i++) {
-      String currentDomainName = inputRows.get(i).domainName();
-      String persistedDomainName = persistedThreats.get(i).getDomainName();
+    // Apply input and evaluation transforms
+    PCollection<Subdomain> input = p.apply(Create.of(badDomain));
+    spec11Pipeline.evaluateUrlHealth(
+        input, evalFn, StaticValueProvider.of("2020-06-10"), mockJpaTm);
+    p.run();
 
-      assertThat(currentDomainName).isEqualTo(persistedDomainName);
-    }
+    // Capture the Spec11ThreatMatch that was persisted
+    Spec11ThreatMatch persistedThreat = threatCaptor.getValue();
 
-    // Verify that jpaTm.transact() was called numTestDomainsForPersistence times.
-    verify(mockJpaTm, times(numTestDomainsForPersistence)).transact(any(Runnable.class));
+    // Verify that the domain names of threats and persistedThreats are equal
+    String badDomainName = badDomain.domainName();
+    String persistedDomainName = persistedThreat.getDomainName();
+    assertThat(badDomainName).isEqualTo(persistedDomainName);
+
+    // Verify that jpaTm.transact() was called one time.
+    verify(mockJpaTm, times(1)).transact(any(Runnable.class));
   }
 
   /**
