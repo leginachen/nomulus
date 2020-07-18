@@ -172,8 +172,7 @@ public class Spec11Pipeline implements Serializable {
     evaluateUrlHealth(
         domains,
         new EvaluateSafeBrowsingFn(options.getSafeBrowsingApiKey(), retrier),
-        options.getDate(),
-        jpaTm);
+        options.getDate());
     p.run();
   }
 
@@ -185,12 +184,11 @@ public class Spec11Pipeline implements Serializable {
   void evaluateUrlHealth(
       PCollection<Subdomain> domains,
       EvaluateSafeBrowsingFn evaluateSafeBrowsingFn,
-      ValueProvider<String> dateProvider,
-      JpaTransactionManager jpaTm) {
+      ValueProvider<String> dateProvider) {
 
-    /* Store ThreatMatch objects in SQL. */
     PCollection<KV<Subdomain, ThreatMatch>> subdomainsSql =
         domains.apply("Run through SafeBrowsing API", ParDo.of(evaluateSafeBrowsingFn));
+    /* Store ThreatMatch objects in SQL. */
     subdomainsSql.apply(
         ParDo.of(
             new DoFn<KV<Subdomain, ThreatMatch>, Void>() {
