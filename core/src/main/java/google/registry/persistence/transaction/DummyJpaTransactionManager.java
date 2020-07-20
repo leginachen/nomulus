@@ -14,6 +14,7 @@
 
 package google.registry.persistence.transaction;
 
+import java.io.Serializable;
 import java.lang.reflect.Proxy;
 
 /**
@@ -26,7 +27,7 @@ import java.lang.reflect.Proxy;
  * <p>If a unit test needs to access the Cloud SQL database, it must add JpaTransactionManagerRule
  * as a JUnit rule in the test class.
  */
-public class DummyJpaTransactionManager {
+public class DummyJpaTransactionManager implements Serializable {
 
   /** Constructs a dummy {@link JpaTransactionManager} instance. */
   public static JpaTransactionManager create() {

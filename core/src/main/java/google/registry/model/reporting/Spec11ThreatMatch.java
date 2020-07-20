@@ -18,7 +18,6 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static google.registry.util.CollectionUtils.isNullOrEmpty;
 import static google.registry.util.PreconditionsUtils.checkArgumentNotNull;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import google.registry.model.Buildable;
@@ -85,7 +84,6 @@ public class Spec11ThreatMatch extends ImmutableObject
   @Column(nullable = false)
   String tld;
 
-  @VisibleForTesting
   public Long getId() {
     return id;
   }
