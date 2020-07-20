@@ -91,7 +91,7 @@ public class Spec11PipelineTest {
    * using the if statement. Because savedList is static, we do not want other tests to write over
    * the value we want from testSpec11ThreatMatchToSql. This Answer is serializable.
    */
-  private static class TestThreatHatchToSqlAnswer implements Answer<Void>, Serializable {
+  private static class TestThreatMatchToSqlAnswer implements Answer<Void>, Serializable {
     @Override
     public Void answer(InvocationOnMock invocation) {
       Spec11ThreatMatch threat = invocation.getArgument(0, Spec11ThreatMatch.class);
@@ -135,7 +135,7 @@ public class Spec11PipelineTest {
     JpaTransactionManager mockJpaTm =
         mock(JpaTransactionManager.class, withSettings().serializable());
     doAnswer(new IgnoringTransactAnswer()).when(mockJpaTm).transact(any(Runnable.class));
-    doAnswer(new TestThreatHatchToSqlAnswer())
+    doAnswer(new TestThreatMatchToSqlAnswer ())
         .when(mockJpaTm)
         .saveNew(any(Spec11ThreatMatch.class));
 
