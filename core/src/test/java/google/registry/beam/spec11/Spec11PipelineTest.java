@@ -24,9 +24,11 @@ import static org.mockito.Mockito.withSettings;
 
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.io.CharStreams;
 import google.registry.beam.spec11.SafeBrowsingTransforms.EvaluateSafeBrowsingFn;
 import google.registry.model.reporting.Spec11ThreatMatch;
+import google.registry.model.reporting.Spec11ThreatMatch.ThreatType;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.testing.AppEngineRule;
 import google.registry.testing.FakeClock;
@@ -59,6 +61,8 @@ import org.apache.http.entity.BasicHttpEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.message.BasicStatusLine;
 import org.joda.time.DateTime;
+import org.joda.time.LocalDate;
+import org.joda.time.format.ISODateTimeFormat;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -89,7 +93,7 @@ public class Spec11PipelineTest {
   /**
    * Answer for the saveNew() call that is only used in testSpec11ThreatMatchToSql. This is enforced
    * using the if statement. Because savedList is static, we do not want other tests to write over
-   * the value we want from testSpec11ThreatMatchToSql. This Answer is serializable.
+   * the value we want from testSpec11ThreatMatchToSql.
    */
   private static class TestThreatMatchToSqlAnswer implements Answer<Void>, Serializable {
     @Override
@@ -263,6 +267,14 @@ public class Spec11PipelineTest {
         Subdomain.create(
             "testThreatMatchToSql.com", "theDomain", "theRegistrar", "fake@theRegistrar.com");
 
+    Spec11ThreatMatch threat = new Spec11ThreatMatch().asBuilder()
+        .setThreatTypes(ImmutableSet.of(ThreatType.MALWARE))
+        .setCheckDate(LocalDate.parse("2020-06-10", ISODateTimeFormat.date()))
+        .setDomainName(badDomain.domainName())
+        .setDomainRepoId(badDomain.domainRepoId())
+        .setRegistrarId(badDomain.registrarId())
+        .build();
+
     // Establish a mock HttpResponse that returns a JSON response based on the request.
     CloseableHttpClient mockHttpClient =
         mock(CloseableHttpClient.class, withSettings().serializable());
@@ -281,7 +293,9 @@ public class Spec11PipelineTest {
 
     // Verify that the domain names of the Subdomain and the persisted Spec11TThreatMatch are equal.
     Spec11ThreatMatch persistedThreat = savedSpec11ThreatMatches.get(0);
-    assertThat(badDomain.domainName()).isEqualTo(persistedThreat.getDomainName());
+    threat.asBuilder()
+        .setId(persistedThreat.getId());
+    assertThat(threat).isEqualTo(persistedThreat);
   }
 
   /**
