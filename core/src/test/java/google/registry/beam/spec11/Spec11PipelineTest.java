@@ -139,7 +139,7 @@ public class Spec11PipelineTest {
     JpaTransactionManager mockJpaTm =
         mock(JpaTransactionManager.class, withSettings().serializable());
     doAnswer(new IgnoringTransactAnswer()).when(mockJpaTm).transact(any(Runnable.class));
-    doAnswer(new TestThreatMatchToSqlAnswer ())
+    doAnswer(new TestThreatMatchToSqlAnswer())
         .when(mockJpaTm)
         .saveNew(any(Spec11ThreatMatch.class));
 
@@ -267,13 +267,15 @@ public class Spec11PipelineTest {
         Subdomain.create(
             "testThreatMatchToSql.com", "theDomain", "theRegistrar", "fake@theRegistrar.com");
 
-    Spec11ThreatMatch threat = new Spec11ThreatMatch().asBuilder()
-        .setThreatTypes(ImmutableSet.of(ThreatType.MALWARE))
-        .setCheckDate(LocalDate.parse("2020-06-10", ISODateTimeFormat.date()))
-        .setDomainName(badDomain.domainName())
-        .setDomainRepoId(badDomain.domainRepoId())
-        .setRegistrarId(badDomain.registrarId())
-        .build();
+    Spec11ThreatMatch threat =
+        new Spec11ThreatMatch()
+            .asBuilder()
+            .setThreatTypes(ImmutableSet.of(ThreatType.MALWARE))
+            .setCheckDate(LocalDate.parse("2020-06-10", ISODateTimeFormat.date()))
+            .setDomainName(badDomain.domainName())
+            .setDomainRepoId(badDomain.domainRepoId())
+            .setRegistrarId(badDomain.registrarId())
+            .build();
 
     // Establish a mock HttpResponse that returns a JSON response based on the request.
     CloseableHttpClient mockHttpClient =
@@ -293,8 +295,7 @@ public class Spec11PipelineTest {
 
     // Verify that the domain names of the Subdomain and the persisted Spec11TThreatMatch are equal.
     Spec11ThreatMatch persistedThreat = savedSpec11ThreatMatches.get(0);
-    threat.asBuilder()
-        .setId(persistedThreat.getId());
+    threat.asBuilder().setId(persistedThreat.getId());
     assertThat(threat).isEqualTo(persistedThreat);
   }
 
