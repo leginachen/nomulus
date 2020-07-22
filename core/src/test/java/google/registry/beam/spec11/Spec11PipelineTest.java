@@ -149,9 +149,9 @@ public class Spec11PipelineTest {
             beamTempFolder.getAbsolutePath() + "/staging",
             beamTempFolder.getAbsolutePath() + "/templates/invoicing",
             tempFolder.getRoot().getAbsolutePath(),
-            mockJpaTm,
             GoogleCredentialsBundle.create(GoogleCredentials.create(null)),
-            retrier);
+            retrier,
+            ()-> mockJpaTm);
   }
 
   private static final ImmutableList<String> BAD_DOMAINS =
