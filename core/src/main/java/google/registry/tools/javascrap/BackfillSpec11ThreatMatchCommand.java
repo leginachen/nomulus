@@ -15,7 +15,6 @@
 package google.registry.tools.javascrap;
 
 import static google.registry.model.EppResourceUtils.loadByForeignKeyCached;
-import static google.registry.persistence.transaction.TransactionManagerFactory.jpaTm;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.appengine.tools.cloudstorage.GcsFilename;
@@ -29,6 +28,7 @@ import google.registry.gcs.GcsUtils;
 import google.registry.model.domain.DomainBase;
 import google.registry.model.reporting.Spec11ThreatMatch;
 import google.registry.model.reporting.Spec11ThreatMatch.ThreatType;
+import google.registry.persistence.transaction.JpaTransactionManager;
 import google.registry.tools.ConfirmingCommand;
 import java.io.IOException;
 import java.io.InputStream;
@@ -59,6 +59,7 @@ public class BackfillSpec11ThreatMatchCommand extends ConfirmingCommand {
   private static ImmutableMap<GcsFilename, LocalDate> filenamesToDates;
 
   @Inject GcsUtils gcsUtils;
+  @Inject JpaTransactionManager jpaTm;
 
   @Override
   protected String prompt() throws IOException {
@@ -74,7 +75,7 @@ public class BackfillSpec11ThreatMatchCommand extends ConfirmingCommand {
         ImmutableList<Spec11ThreatMatch> threatMatches =
             getSpec11ThreatMatchesFromFile(
                 spec11ReportFilename, filenamesToDates.get(spec11ReportFilename));
-        jpaTm().transact(() -> jpaTm().saveNewOrUpdateAll(threatMatches));
+        jpaTm.transact(() -> jpaTm.saveNewOrUpdateAll(threatMatches));
       } catch (IOException e) {
         failedFilesBuilder.add(spec11ReportFilename);
       }
