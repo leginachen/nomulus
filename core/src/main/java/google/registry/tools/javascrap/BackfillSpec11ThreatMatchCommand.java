@@ -18,12 +18,14 @@ import static google.registry.model.EppResourceUtils.loadByForeignKeyCached;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.appengine.tools.cloudstorage.GcsFilename;
+import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.CharStreams;
 import google.registry.beam.spec11.Spec11Pipeline;
 import google.registry.beam.spec11.ThreatMatch;
+import google.registry.config.RegistryConfig.Config;
 import google.registry.gcs.GcsUtils;
 import google.registry.model.domain.DomainBase;
 import google.registry.model.reporting.Spec11ThreatMatch;
@@ -33,11 +35,9 @@ import google.registry.tools.ConfirmingCommand;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.HashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
-import jdk.nashorn.internal.ir.annotations.Immutable;
 import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
 import org.joda.time.YearMonth;
@@ -47,24 +47,30 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 public class BackfillSpec11ThreatMatchCommand extends ConfirmingCommand {
-
   private static final YearMonth START_MONTH = new YearMonth(2019, 01);
-  private static final YearMonth END_MONTH =
-      new YearMonth(); // Constructs a YearMonth with the current year and month
+  private static final YearMonth END_MONTH = new YearMonth(); // This defaults to the current month.
 
-  private static int numFiles = 0;
   private static final Pattern FILENAME_PATTERN =
       Pattern.compile("SPEC11_MONTHLY_REPORT_(\\d{4}-\\d{2}-\\d{2})");
-  private static final String REPORTING_FOLDER = "domain-registry-reporting/icann/spec11/";
-  private static ImmutableMap<GcsFilename, LocalDate> filenamesToDates;
+  private final String reportingFolder;
+  private ImmutableMap<GcsFilename, LocalDate> filenamesToDates;
+  private final GcsUtils gcsUtils;
+  private final JpaTransactionManager jpaTm;
 
-  @Inject GcsUtils gcsUtils;
-  @Inject JpaTransactionManager jpaTm;
+  @Inject
+  public BackfillSpec11ThreatMatchCommand(
+      GcsUtils gcsUtils,
+      JpaTransactionManager jpaTm,
+      @Config("reportingBucket") String reportingBucket) {
+    this.gcsUtils = gcsUtils;
+    this.jpaTm = jpaTm;
+    this.reportingFolder = String.format("%s%s", reportingBucket, "/icann/spec11/");
+  }
 
   @Override
   protected String prompt() throws IOException {
     filenamesToDates = mapFilenamesToDates(START_MONTH, END_MONTH);
-    return String.format("Parsing through %d files.", numFiles);
+    return String.format("Parsing through %d files.", filenamesToDates.size());
   }
 
   @Override
@@ -82,11 +88,11 @@ public class BackfillSpec11ThreatMatchCommand extends ConfirmingCommand {
     }
     ImmutableSet<GcsFilename> failedFiles = failedFilesBuilder.build();
     if (failedFiles.isEmpty()) {
-      return String.format("Successfully parsed through %d files.", numFiles);
+      return String.format("Successfully parsed through %d files.", filenamesToDates.size());
     } else {
       return String.format(
-          "Successfully parsed through %d files. We failed to parse through the following files: %s",
-          numFiles - failedFiles.size(), failedFiles);
+          "Successfully parsed through %d files. Failed to parse through the following files: %s",
+          filenamesToDates.size() - failedFiles.size(), Joiner.on('\n').join(failedFiles));
     }
   }
 
@@ -152,7 +158,7 @@ public class BackfillSpec11ThreatMatchCommand extends ConfirmingCommand {
     ImmutableMap.Builder<GcsFilename, LocalDate> mappedFilenamesToDates =
         new ImmutableMap.Builder<>();
     while (!startMonth.isAfter(endMonth)) {
-      String bucket = String.format("%s%s", REPORTING_FOLDER, startMonth.toString());
+      String bucket = String.format("%s%s", reportingFolder, startMonth.toString());
       ImmutableList<String> filesFromBucket =
           gcsUtils.listFolderObjects(bucket, "SPEC11_MONTHLY_REPORT_");
       for (String filename : filesFromBucket) {
@@ -161,7 +167,6 @@ public class BackfillSpec11ThreatMatchCommand extends ConfirmingCommand {
             new GcsFilename(
                 "domain-registry-reporting", Spec11Pipeline.getSpec11ReportFilePath(fileDate)),
             fileDate);
-        numFiles += 1;
       }
       startMonth = startMonth.plusMonths(1);
     }
