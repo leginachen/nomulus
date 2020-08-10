@@ -134,8 +134,10 @@ public class BackfillSpec11ThreatMatchCommand extends ConfirmingCommand {
       GcsFilename spec11ReportFilename, LocalDate date) throws IOException, JSONException {
     ImmutableList.Builder<Spec11ThreatMatch> threatMatches = ImmutableList.builder();
     try (InputStream in = gcsUtils.openInputStream(spec11ReportFilename)) {
+      InputStreamReader streamReader = new InputStreamReader(in, UTF_8);
       ImmutableList<String> reportLines =
-          ImmutableList.copyOf(CharStreams.toString(new InputStreamReader(in, UTF_8)).split("\n"));
+          ImmutableList.copyOf(CharStreams.toString(streamReader).split("\n"));
+      streamReader.close();
       // Iterate from 1 to size() to skip the header at line 0.
       for (int i = 1; i < reportLines.size(); i++) {
         threatMatches.addAll(createSpec11ThreatMatches(reportLines.get(i), date));
