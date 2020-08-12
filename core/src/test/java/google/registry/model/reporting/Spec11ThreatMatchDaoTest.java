@@ -43,7 +43,6 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
               jpaTm().saveNew(createThreatMatchByDate("today.com", TODAY));
               jpaTm().saveNew(createThreatMatchByDate("today.org", TODAY));
               jpaTm().saveNew(createThreatMatchByDate("yesterday.com", YESTERDAY));
-              ImmutableList<Spec11ThreatMatch> domains = jpaTm().loadAll(Spec11ThreatMatch.class);
             });
   }
 
