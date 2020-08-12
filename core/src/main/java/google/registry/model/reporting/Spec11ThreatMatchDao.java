@@ -18,10 +18,13 @@ import com.google.common.collect.ImmutableList;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import org.joda.time.LocalDate;
 
-/** Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch} */
+/** Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch}. */
 public class Spec11ThreatMatchDao {
 
-  /** Delete all entries with the specified date from the database. */
+  /**
+   * Delete all entries with the specified date from the database. A JpaTransactionManager is passed
+   * in because this method is called from a BEAM pipeline and we don't know where it's coming from.
+   */
   public static void deleteEntriesByDate(JpaTransactionManager jpaTm, LocalDate date) {
     jpaTm.assertInTransaction();
     jpaTm
@@ -31,7 +34,11 @@ public class Spec11ThreatMatchDao {
         .executeUpdate();
   }
 
-  /** Query the database and return a list of Spec11ThreatMatches with the specified date. */
+  /**
+   * Query the database and return a list of Spec11ThreatMatches with the specified date. A
+   * JpaTransactionManager is passed in because this method is called from a BEAM pipeline and we
+   * don't know where it's coming from.
+   */
   public static ImmutableList<String> loadEntriesByDate(
       JpaTransactionManager jpaTm, LocalDate date) {
     jpaTm.assertInTransaction();
