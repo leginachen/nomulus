@@ -35,7 +35,7 @@ public class Spec11ThreatMatchDao {
   }
 
   /**
-   * Query the database and return a list of Spec11ThreatMatches with the specified date. A
+   * Query the database and return a list of domain names with the specified date. A
    * JpaTransactionManager is passed in because this method is called from a BEAM pipeline and we
    * don't know where it's coming from.
    */
