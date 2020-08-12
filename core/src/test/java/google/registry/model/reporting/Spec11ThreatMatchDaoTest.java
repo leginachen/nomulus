@@ -40,9 +40,9 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
     jpaTm()
         .transact(
             () -> {
-              jpaTm().saveNew(createThreatMatchByDate("today.com", TODAY));
-              jpaTm().saveNew(createThreatMatchByDate("today.org", TODAY));
-              jpaTm().saveNew(createThreatMatchByDate("yesterday.com", YESTERDAY));
+              jpaTm().saveNew(createThreatMatch("today.com", TODAY));
+              jpaTm().saveNew(createThreatMatch("today.org", TODAY));
+              jpaTm().saveNew(createThreatMatch("yesterday.com", YESTERDAY));
             });
   }
 
@@ -79,7 +79,7 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
         });
   }
 
-  private Spec11ThreatMatch createThreatMatchByDate(String domainName, LocalDate date) {
+  private Spec11ThreatMatch createThreatMatch(String domainName, LocalDate date) {
     Spec11ThreatMatch threatMatch =
         new Spec11ThreatMatch()
             .asBuilder()
