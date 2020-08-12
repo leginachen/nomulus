@@ -15,6 +15,7 @@
 package google.registry.model.reporting;
 
 import static com.google.common.truth.Truth.assertThat;
+import static google.registry.model.ImmutableObjectSubject.immutableObjectCorrespondence;
 import static google.registry.persistence.transaction.TransactionManagerFactory.jpaTm;
 
 import com.google.common.collect.ImmutableList;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 /** Unit tests for {@link Spec11ThreatMatchDao}. */
 public class Spec11ThreatMatchDaoTest extends EntityTestCase {
+
   private static final LocalDate TODAY = new LocalDate(2020, 8, 4);
   private static final LocalDate YESTERDAY = new LocalDate(2020, 8, 3);
 
@@ -35,9 +37,8 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
     jpaTm()
         .transact(
             () -> {
-              jpaTm().saveNew(createThreatMatch("today.com", TODAY));
-              jpaTm().saveNew(createThreatMatch("today.org", TODAY));
-              jpaTm().saveNew(createThreatMatch("yesterday.com", YESTERDAY));
+              jpaTm().saveAllNew(getThreatMatchesToday());
+              jpaTm().saveAllNew(getThreatMatchesYesterday());
             });
   }
 
@@ -48,7 +49,7 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
         .transact(
             () -> {
               Spec11ThreatMatchDao.deleteEntriesByDate(jpaTm(), TODAY);
-              ImmutableList<String> persistedToday =
+              ImmutableList<Spec11ThreatMatch> persistedToday =
                   Spec11ThreatMatchDao.loadEntriesByDate(jpaTm(), TODAY);
               assertThat(persistedToday).isEmpty();
             });
@@ -57,9 +58,11 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
     jpaTm()
         .transact(
             () -> {
-              ImmutableList<String> persistedYesterday =
+              ImmutableList<Spec11ThreatMatch> persistedYesterday =
                   Spec11ThreatMatchDao.loadEntriesByDate(jpaTm(), YESTERDAY);
-              assertThat(persistedYesterday).containsExactly("yesterday.com");
+              assertThat(persistedYesterday)
+                  .comparingElementsUsing(immutableObjectCorrespondence("id"))
+                  .containsExactlyElementsIn(getThreatMatchesYesterday());
             });
   }
 
@@ -68,11 +71,24 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
     jpaTm()
         .transact(
             () -> {
-              ImmutableList<String> persisted =
+              ImmutableList<Spec11ThreatMatch> persisted =
                   Spec11ThreatMatchDao.loadEntriesByDate(jpaTm(), TODAY);
-              assertThat(persisted).contains("today.com");
-              assertThat(persisted).contains("today.org");
+
+              assertThat(persisted)
+                  .comparingElementsUsing(immutableObjectCorrespondence("id"))
+                  .containsExactlyElementsIn(getThreatMatchesToday());
             });
+  }
+
+  private ImmutableList<Spec11ThreatMatch> getThreatMatchesYesterday() {
+    return ImmutableList.of(
+        createThreatMatch("yesterday.com", YESTERDAY),
+        createThreatMatch("yesterday.org", YESTERDAY));
+  }
+
+  private ImmutableList<Spec11ThreatMatch> getThreatMatchesToday() {
+    return ImmutableList.of(
+        createThreatMatch("today.com", TODAY), createThreatMatch("today.org", TODAY));
   }
 
   private Spec11ThreatMatch createThreatMatch(String domainName, LocalDate date) {

@@ -18,12 +18,13 @@ import com.google.common.collect.ImmutableList;
 import google.registry.persistence.transaction.JpaTransactionManager;
 import org.joda.time.LocalDate;
 
-/** Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch}. */
+/**
+ * Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch}. A
+ * JpaTransactionManager is passed into each static method because they are called from a BEAM
+ * pipeline and we don't know where it's coming from.
+ */
 public class Spec11ThreatMatchDao {
-  /**
-   * Delete all entries with the specified date from the database. A JpaTransactionManager is passed
-   * in because this method is called from a BEAM pipeline and we don't know where it's coming from.
-   */
+  /** Delete all entries with the specified date from the database. */
   public static void deleteEntriesByDate(JpaTransactionManager jpaTm, LocalDate date) {
     jpaTm.assertInTransaction();
     jpaTm
@@ -33,20 +34,17 @@ public class Spec11ThreatMatchDao {
         .executeUpdate();
   }
 
-  /**
-   * Query the database and return a list of domain names with the specified date. A
-   * JpaTransactionManager is passed in because this method is called from a BEAM pipeline and we
-   * don't know where it's coming from.
-   */
-  public static ImmutableList<String> loadEntriesByDate(
+  /** Query the database and return a list of domain names with the specified date. */
+  public static ImmutableList<Spec11ThreatMatch> loadEntriesByDate(
       JpaTransactionManager jpaTm, LocalDate date) {
     jpaTm.assertInTransaction();
     return ImmutableList.copyOf(
         jpaTm
             .getEntityManager()
             .createQuery(
-                "SELECT domainName FROM Spec11ThreatMatch WHERE check_date = :date", String.class)
-            .setParameter("date", date.toString())
+                "SELECT match FROM Spec11ThreatMatch match WHERE match.checkDate = :date",
+                Spec11ThreatMatch.class)
+            .setParameter("date", date)
             .getResultList());
   }
 }
