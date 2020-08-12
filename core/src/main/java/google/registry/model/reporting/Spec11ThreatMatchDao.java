@@ -20,25 +20,26 @@ import org.joda.time.LocalDate;
 
 /** Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch} */
 public class Spec11ThreatMatchDao {
+
   /** Delete all entries with the specified date from the database. */
   public static void deleteEntriesByDate(JpaTransactionManager jpaTm, LocalDate date) {
     jpaTm.assertInTransaction();
     jpaTm
         .getEntityManager()
-        .createQuery("DELETE FROM Spec11ThreatMatch" + " WHERE check_date = :date")
-        .setParameter("date", date.toString());
+        .createQuery("DELETE FROM Spec11ThreatMatch WHERE check_date = :date")
+        .setParameter("date", date.toString())
+        .executeUpdate();
   }
 
   /** Query the database and return a list of Spec11ThreatMatches with the specified date. */
-  public static ImmutableList<Spec11ThreatMatch> loadEntriesByDate(
+  public static ImmutableList<String> loadEntriesByDate(
       JpaTransactionManager jpaTm, LocalDate date) {
     jpaTm.assertInTransaction();
     return ImmutableList.copyOf(
         jpaTm
             .getEntityManager()
             .createQuery(
-                "SELECT * FROM Spec11ThreatMatch" + " WHERE check_date = :date",
-                Spec11ThreatMatch.class)
+                "SELECT domainName FROM Spec11ThreatMatch WHERE check_date = :date", String.class)
             .setParameter("date", date.toString())
             .getResultList());
   }

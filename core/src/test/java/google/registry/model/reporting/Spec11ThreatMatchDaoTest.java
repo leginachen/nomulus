@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Test;
 public class Spec11ThreatMatchDaoTest extends EntityTestCase {
   private static final LocalDate TODAY = new LocalDate(2020, 8, 4);
   private static final LocalDate YESTERDAY = new LocalDate(2020, 8, 3);
-  private static JpaTransactionManager jpaTm = jpaTm();
 
   Spec11ThreatMatchDaoTest() {
     super(JpaEntityCoverageCheck.ENABLED);
@@ -38,34 +37,47 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
 
   @BeforeEach
   void setUp() {
+    jpaTm()
+        .transact(
+            () -> {
+              jpaTm().saveNew(createThreatMatchByDate("today.com", TODAY));
+              jpaTm().saveNew(createThreatMatchByDate("today.org", TODAY));
+              jpaTm().saveNew(createThreatMatchByDate("yesterday.com", YESTERDAY));
+              ImmutableList<Spec11ThreatMatch> domains = jpaTm().loadAll(Spec11ThreatMatch.class);
+            });
+  }
+
+  @Test
+  void testDeleteEntriesByDate() {
+    JpaTransactionManager jpaTm = jpaTm();
+
+    // Verify that all entries with the date TODAY were removed
     jpaTm.transact(
         () -> {
-          jpaTm.saveNew(createThreatMatchByDate("today.com", TODAY));
-          jpaTm.saveNew(createThreatMatchByDate("today.org", TODAY));
-          jpaTm.saveNew(createThreatMatchByDate("yesterday.com", YESTERDAY));
+          Spec11ThreatMatchDao.deleteEntriesByDate(jpaTm, TODAY);
+          ImmutableList<String> persistedToday =
+              Spec11ThreatMatchDao.loadEntriesByDate(jpaTm, TODAY);
+          assertThat(persistedToday).isEmpty();
+        });
+
+    // Verify that all other entries were not removed
+    jpaTm.transact(
+        () -> {
+          ImmutableList<String> persistedYesterday =
+              Spec11ThreatMatchDao.loadEntriesByDate(jpaTm, YESTERDAY);
+          assertThat(persistedYesterday).contains("yesterday.com");
         });
   }
 
   @Test
   void testLoadEntriesByDate() {
-    ImmutableList<Spec11ThreatMatch> persisted =
-        Spec11ThreatMatchDao.loadEntriesByDate(jpaTm, TODAY);
-    assertThat(persisted).contains(createThreatMatchByDate("today.com", TODAY));
-    assertThat(persisted).contains(createThreatMatchByDate("today.org", TODAY));
-  }
-
-  @Test
-  void testDeleteEntriesByDate() {
-    // Verify that all entries with the date TODAY were removed
-    Spec11ThreatMatchDao.deleteEntriesByDate(jpaTm, TODAY);
-    ImmutableList<Spec11ThreatMatch> persistedToday =
-        Spec11ThreatMatchDao.loadEntriesByDate(jpaTm, TODAY);
-    assertThat(persistedToday).isEmpty();
-
-    // Verify that all other entries were not removed
-    ImmutableList<Spec11ThreatMatch> persistedYesterday =
-        Spec11ThreatMatchDao.loadEntriesByDate(jpaTm, YESTERDAY);
-    assertThat(persistedYesterday).contains(createThreatMatchByDate("yesterday.com", YESTERDAY));
+    JpaTransactionManager jpaTm = jpaTm();
+    jpaTm.transact(
+        () -> {
+          ImmutableList<String> persisted = Spec11ThreatMatchDao.loadEntriesByDate(jpaTm, TODAY);
+          assertThat(persisted).contains("today.com");
+          assertThat(persisted).contains("today.org");
+        });
   }
 
   private Spec11ThreatMatch createThreatMatchByDate(String domainName, LocalDate date) {
@@ -78,7 +90,6 @@ public class Spec11ThreatMatchDaoTest extends EntityTestCase {
             .setRegistrarId("Example Registrar")
             .setDomainRepoId("1-COM")
             .build();
-
     return threatMatch;
   }
 }
