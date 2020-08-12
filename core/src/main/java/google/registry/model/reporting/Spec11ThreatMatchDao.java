@@ -20,7 +20,6 @@ import org.joda.time.LocalDate;
 
 /** Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch}. */
 public class Spec11ThreatMatchDao {
-
   /**
    * Delete all entries with the specified date from the database. A JpaTransactionManager is passed
    * in because this method is called from a BEAM pipeline and we don't know where it's coming from.
