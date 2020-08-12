@@ -19,11 +19,13 @@ import google.registry.persistence.transaction.JpaTransactionManager;
 import org.joda.time.LocalDate;
 
 /**
- * Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch}. A
- * JpaTransactionManager is passed into each static method because they are called from a BEAM
- * pipeline and we don't know where it's coming from.
+ * Data access object for {@link google.registry.model.reporting.Spec11ThreatMatch}.
+ *
+ * <p>A JpaTransactionManager is passed into each static method because they are called from a BEAM
+ * pipeline and we don't know where it's coming from.</p>
  */
 public class Spec11ThreatMatchDao {
+  
   /** Delete all entries with the specified date from the database. */
   public static void deleteEntriesByDate(JpaTransactionManager jpaTm, LocalDate date) {
     jpaTm.assertInTransaction();
