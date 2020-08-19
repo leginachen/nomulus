@@ -16,8 +16,9 @@ package google.registry.flows.domain;
 
 import static com.google.common.truth.Truth.assertThat;
 import static google.registry.flows.domain.DomainTransferFlowTestCase.persistWithPendingTransfer;
-import static google.registry.model.ofy.ObjectifyService.ofy;
+import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.testing.DatastoreHelper.assertBillingEvents;
+import static google.registry.testing.DatastoreHelper.assertPollMessages;
 import static google.registry.testing.DatastoreHelper.createTld;
 import static google.registry.testing.DatastoreHelper.getOnlyHistoryEntryOfType;
 import static google.registry.testing.DatastoreHelper.loadRegistrar;
@@ -33,12 +34,11 @@ import static google.registry.util.DateTimeUtils.END_OF_TIME;
 import static google.registry.util.DateTimeUtils.START_OF_TIME;
 import static org.joda.money.CurrencyUnit.EUR;
 import static org.joda.money.CurrencyUnit.USD;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
-import com.googlecode.objectify.Key;
 import google.registry.flows.EppException;
 import google.registry.flows.FlowUtils.UnknownCurrencyEppException;
 import google.registry.flows.ResourceFlowTestCase;
@@ -137,8 +137,8 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, DomainBa
             .asBuilder()
             .setRegistrationExpirationTime(expirationTime)
             .setStatusValues(ImmutableSet.copyOf(statusValues))
-            .setAutorenewBillingEvent(Key.create(autorenewEvent))
-            .setAutorenewPollMessage(Key.create(autorenewPollMessage))
+            .setAutorenewBillingEvent(autorenewEvent.createVKey())
+            .setAutorenewPollMessage(autorenewPollMessage.createVKey())
             .build());
     clock.advanceOneMilli();
   }
@@ -175,7 +175,7 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, DomainBa
     DomainBase domain = reloadResourceByForeignKey();
     HistoryEntry historyEntryDomainRenew =
         getOnlyHistoryEntryOfType(domain, HistoryEntry.Type.DOMAIN_RENEW);
-    assertThat(ofy().load().key(domain.getAutorenewBillingEvent()).now().getEventTime())
+    assertThat(tm().load(domain.getAutorenewBillingEvent()).getEventTime())
         .isEqualTo(newExpiration);
     assertAboutDomains()
         .that(domain)
@@ -237,6 +237,7 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, DomainBa
         ImmutableMap.of(
             GracePeriod.create(
                 GracePeriodStatus.RENEW,
+                domain.getRepoId(),
                 clock.nowUtc().plus(Registry.get("tld").getRenewGracePeriodLength()),
                 renewalClientId,
                 null),
@@ -470,10 +471,7 @@ class DomainRenewFlowTest extends ResourceFlowTestCase<DomainRenewFlow, DomainBa
     persistDomain();
     // Modify the autorenew poll message so that it has an undelivered message in the past.
     persistResource(
-        ofy()
-            .load()
-            .key(reloadResourceByForeignKey().getAutorenewPollMessage())
-            .now()
+        tm().load(reloadResourceByForeignKey().getAutorenewPollMessage())
             .asBuilder()
             .setEventTime(expirationTime.minusYears(1))
             .build());

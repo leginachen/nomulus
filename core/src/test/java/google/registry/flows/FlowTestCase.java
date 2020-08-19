@@ -16,14 +16,12 @@ package google.registry.flows;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Sets.difference;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static google.registry.model.eppcommon.EppXmlTransformer.marshal;
 import static google.registry.model.ofy.ObjectifyService.ofy;
-import static google.registry.testing.DatastoreHelper.POLL_MESSAGE_ID_STRIPPER;
-import static google.registry.testing.DatastoreHelper.getPollMessages;
+import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.testing.DatastoreHelper.stripBillingEventId;
 import static google.registry.xml.XmlTestUtils.assertXmlEquals;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -33,7 +31,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.collect.ObjectArrays;
-import com.google.common.collect.Streams;
 import google.registry.config.RegistryConfig.ConfigModule.TmchCaMode;
 import google.registry.flows.EppTestComponent.FakesAndMocksModule;
 import google.registry.flows.picker.FlowPicker;
@@ -43,15 +40,14 @@ import google.registry.model.eppcommon.ProtocolDefinition;
 import google.registry.model.eppinput.EppInput;
 import google.registry.model.eppoutput.EppOutput;
 import google.registry.model.ofy.Ofy;
-import google.registry.model.poll.PollMessage;
 import google.registry.model.reporting.HistoryEntry;
 import google.registry.model.tmch.ClaimsListShard.ClaimsListSingleton;
 import google.registry.monitoring.whitebox.EppMetric;
-import google.registry.testing.AppEngineRule;
+import google.registry.testing.AppEngineExtension;
 import google.registry.testing.EppLoader;
 import google.registry.testing.FakeClock;
 import google.registry.testing.FakeHttpSession;
-import google.registry.testing.InjectRule;
+import google.registry.testing.InjectExtension;
 import google.registry.testing.TestDataHelper;
 import google.registry.tmch.TmchCertificateAuthority;
 import google.registry.tmch.TmchXmlSignature;
@@ -73,16 +69,22 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 public abstract class FlowTestCase<F extends Flow> {
 
   /** Whether to actually write to Datastore or just simulate. */
-  public enum CommitMode { LIVE, DRY_RUN }
+  public enum CommitMode {
+    LIVE,
+    DRY_RUN
+  }
 
   /** Whether to run in normal or superuser mode. */
-  public enum UserPrivileges { NORMAL, SUPERUSER }
+  public enum UserPrivileges {
+    NORMAL,
+    SUPERUSER
+  }
 
   @RegisterExtension
-  public final AppEngineRule appEngine =
-      AppEngineRule.builder().withDatastoreAndCloudSql().withTaskQueue().build();
+  final AppEngineExtension appEngine =
+      AppEngineExtension.builder().withDatastoreAndCloudSql().withTaskQueue().build();
 
-  @RegisterExtension public final InjectRule inject = new InjectRule();
+  @RegisterExtension final InjectExtension inject = new InjectExtension();
 
   protected EppLoader eppLoader;
   protected SessionMetadata sessionMetadata;
@@ -94,7 +96,7 @@ public abstract class FlowTestCase<F extends Flow> {
   private EppMetric.Builder eppMetricBuilder;
 
   @BeforeEach
-  public void init() {
+  public void beforeEachFlowTestCase() {
     sessionMetadata = new HttpSessionMetadata(new FakeHttpSession());
     sessionMetadata.setClientId("TheRegistrar");
     sessionMetadata.setServiceExtensionUris(ProtocolDefinition.getVisibleServiceExtensionUris());
@@ -178,6 +180,7 @@ public abstract class FlowTestCase<F extends Flow> {
       builder.put(
           GracePeriod.create(
               entry.getKey().getType(),
+              entry.getKey().getDomainRepoId(),
               entry.getKey().getExpirationTime(),
               entry.getKey().getClientId(),
               null),
@@ -190,12 +193,9 @@ public abstract class FlowTestCase<F extends Flow> {
     assertWithMessage("Billing event is present for grace period: " + gracePeriod)
         .that(gracePeriod.hasBillingEvent())
         .isTrue();
-    return ofy()
-        .load()
-        .key(
+    return tm().load(
             firstNonNull(
-                gracePeriod.getOneTimeBillingEvent(), gracePeriod.getRecurringBillingEvent()))
-        .now();
+                gracePeriod.getOneTimeBillingEvent(), gracePeriod.getRecurringBillingEvent()));
   }
 
   /**
@@ -207,24 +207,6 @@ public abstract class FlowTestCase<F extends Flow> {
       Iterable<GracePeriod> actual, ImmutableMap<GracePeriod, ? extends BillingEvent> expected) {
     assertThat(canonicalizeGracePeriods(Maps.toMap(actual, FlowTestCase::expandGracePeriod)))
         .isEqualTo(canonicalizeGracePeriods(expected));
-  }
-
-  protected void assertPollMessages(String clientId, PollMessage... expected) {
-    assertPollMessagesHelper(getPollMessages(clientId), expected);
-  }
-
-  protected void assertPollMessages(PollMessage... expected) {
-    assertPollMessagesHelper(getPollMessages(), expected);
-  }
-
-  /** Assert that the list matches all the poll messages in the fake Datastore. */
-  private void assertPollMessagesHelper(
-      Iterable<PollMessage> pollMessages, PollMessage... expected) {
-    // Ordering is irrelevant but duplicates should be considered independently.
-    assertThat(
-            Streams.stream(pollMessages).map(POLL_MESSAGE_ID_STRIPPER).collect(toImmutableList()))
-        .containsExactlyElementsIn(
-            Arrays.stream(expected).map(POLL_MESSAGE_ID_STRIPPER).collect(toImmutableList()));
   }
 
   private EppOutput runFlowInternal(CommitMode commitMode, UserPrivileges userPrivileges)

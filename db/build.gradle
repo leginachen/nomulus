@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import org.gradle.api.internal.tasks.userinput.UserInputHandler
-
 plugins {
   id "org.flywaydb.flyway" version "6.0.1"
   id 'maven-publish'
@@ -31,11 +29,12 @@ ext {
   def dbServer = findProperty(dbServerProperty).toString().toLowerCase()
   def dbName = findProperty(dbNameProperty)
 
-  isCloudSql = {
-    return allDbEnv.contains(dbServer)
+  isRestricted = {
+    return restrictedDbEnv.contains(dbServer)
   }
 
   getAccessInfoByHostPort = { hostAndPort ->
+    println "Database set to ${hostAndPort}."
     return [
         url: "jdbc:postgresql://${hostAndPort}/${dbName}",
         user: findProperty('dbUser'),
@@ -45,6 +44,7 @@ ext {
   getSocketFactoryAccessInfo = { env ->
     def cred = getCloudSqlCredential(env, 'admin').split(' ')
     def sqlInstance = cred[0]
+    println "Database set to Cloud SQL instance ${sqlInstance}."
     return [
         url: """\
                    jdbc:postgresql://google/${dbName}?cloudSqlInstance=
@@ -73,14 +73,17 @@ ext {
   getCloudSqlCredential = { env, role ->
     def devProject = project.hasProperty('devProject')
         ? project.getProperty('devProject') : rootProject.devProject
+    def gcpProject = project.hasProperty('gcpProject')
+        ? project.getProperty('gcpProject') : rootProject.gcpProject
+    def keyProject = env in restrictedDbEnv? devProject : gcpProject
     def command =
         """gsutil cp \
-           gs://${devProject}-deploy/cloudsql-credentials/${env}/${role}_credential.enc - | \
+           gs://${gcpProject}-beam/cloudsql/${role}_credential.enc - | \
            base64 -d | \
            gcloud kms decrypt --location global --keyring nomulus-tool-keyring \
            --key nomulus-tool-key --plaintext-file=- \
            --ciphertext-file=- \
-           --project=${devProject}"""
+           --project=${keyProject}"""
 
     return execInBash(command, '/tmp')
   }
@@ -154,20 +157,20 @@ dependencies {
   testCompile deps['com.google.guava:guava']
   testCompile deps['com.google.truth:truth']
   testRuntime deps['io.github.java-diff-utils:java-diff-utils']
-  testCompile deps['junit:junit']
   testCompile deps['org.junit.jupiter:junit-jupiter-api']
   testCompile deps['org.junit.jupiter:junit-jupiter-engine']
-  testCompile deps['org.junit.vintage:junit-vintage-engine']
   testCompile deps['org.testcontainers:postgresql']
   testCompile deps['org.testcontainers:testcontainers']
+  testCompile deps['org.testcontainers:junit-jupiter']
+  testCompile deps['org.testcontainers:postgresql']
   testCompile project(path: ':common', configuration: 'testing')
 }
 
 flywayInfo.dependsOn('buildNeeded')
 flywayValidate.dependsOn('buildNeeded')
 
-if (ext.isCloudSql()) {
-  // Disable dangerous Flyway tasks. Only allow info and validate.
+if (ext.isRestricted()) {
+  // Disable dangerous Flyway tasks in sandbox and production. Only allow info and validate.
   tasks.findAll { task -> task.group.equals('Flyway')}.each {
     if (it.name == 'flywayMigrate') {
       it.doFirst {

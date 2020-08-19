@@ -19,7 +19,6 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static google.registry.model.EppResourceUtils.projectResourceOntoBuilderAtTime;
 
 import com.google.common.collect.ImmutableList;
-import com.googlecode.objectify.Key;
 import com.googlecode.objectify.annotation.IgnoreSave;
 import com.googlecode.objectify.annotation.Index;
 import com.googlecode.objectify.condition.IfNull;
@@ -44,10 +43,11 @@ import org.joda.time.DateTime;
 /**
  * A persistable contact resource including mutable and non-mutable fields.
  *
+ * <p>This class deliberately does not include an {@link javax.persistence.Id} so that any
+ * foreign-keyed fields can refer to the proper parent entity's ID, whether we're storing this in
+ * the DB itself or as part of another entity
+ *
  * @see <a href="https://tools.ietf.org/html/rfc5733">RFC 5733</a>
- *     <p>This class deliberately does not include an {@link javax.persistence.Id} so that any
- *     foreign-keyed fields can refer to the proper parent entity's ID, whether we're storing this
- *     in the DB itself or as part of another entity
  */
 @MappedSuperclass
 @Embeddable
@@ -184,8 +184,9 @@ public class ContactBase extends EppResource implements ResourceWithTransferData
 
   @Override
   public VKey<? extends ContactBase> createVKey() {
-    // TODO(mmuller): create symmetric keys if we can ever reload both sides.
-    return VKey.create(ContactBase.class, getRepoId(), Key.create(this));
+    throw new UnsupportedOperationException(
+        "ContactBase is not an actual persisted entity you can create a key to;"
+            + " use ContactResource instead");
   }
 
   public String getContactId() {

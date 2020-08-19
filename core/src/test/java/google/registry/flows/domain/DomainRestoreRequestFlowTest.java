@@ -15,8 +15,9 @@
 package google.registry.flows.domain;
 
 import static com.google.common.truth.Truth.assertThat;
-import static google.registry.model.ofy.ObjectifyService.ofy;
+import static google.registry.persistence.transaction.TransactionManagerFactory.tm;
 import static google.registry.testing.DatastoreHelper.assertBillingEvents;
+import static google.registry.testing.DatastoreHelper.assertPollMessages;
 import static google.registry.testing.DatastoreHelper.createTld;
 import static google.registry.testing.DatastoreHelper.getOnlyHistoryEntryOfType;
 import static google.registry.testing.DatastoreHelper.getPollMessages;
@@ -33,12 +34,11 @@ import static google.registry.util.DateTimeUtils.END_OF_TIME;
 import static google.registry.util.DateTimeUtils.START_OF_TIME;
 import static org.joda.money.CurrencyUnit.EUR;
 import static org.joda.money.CurrencyUnit.USD;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
-import com.googlecode.objectify.Key;
 import google.registry.flows.EppException;
 import google.registry.flows.EppException.UnimplementedExtensionException;
 import google.registry.flows.FlowUtils.UnknownCurrencyEppException;
@@ -113,16 +113,20 @@ class DomainRestoreRequestFlowTest
             .setDeletionTime(clock.nowUtc().plusDays(35))
             .addGracePeriod(
                 GracePeriod.create(
-                    GracePeriodStatus.REDEMPTION, clock.nowUtc().plusDays(1), "foo", null))
+                    GracePeriodStatus.REDEMPTION,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "foo",
+                    null))
             .setStatusValues(ImmutableSet.of(StatusValue.PENDING_DELETE))
             .setDeletePollMessage(
-                Key.create(
-                    persistResource(
+                persistResource(
                         new PollMessage.OneTime.Builder()
                             .setClientId("TheRegistrar")
                             .setEventTime(clock.nowUtc().plusDays(5))
                             .setParent(historyEntry)
-                            .build())))
+                            .build())
+                    .createVKey())
             .build());
     clock.advanceOneMilli();
   }
@@ -146,7 +150,7 @@ class DomainRestoreRequestFlowTest
     DomainBase domain = reloadResourceByForeignKey();
     HistoryEntry historyEntryDomainRestore =
         getOnlyHistoryEntryOfType(domain, HistoryEntry.Type.DOMAIN_RESTORE);
-    assertThat(ofy().load().key(domain.getAutorenewBillingEvent()).now().getEventTime())
+    assertThat(tm().load(domain.getAutorenewBillingEvent()).getEventTime())
         .isEqualTo(expirationTime);
     assertAboutDomains()
         .that(domain)
@@ -214,7 +218,7 @@ class DomainRestoreRequestFlowTest
     DomainBase domain = reloadResourceByForeignKey();
     HistoryEntry historyEntryDomainRestore =
         getOnlyHistoryEntryOfType(domain, HistoryEntry.Type.DOMAIN_RESTORE);
-    assertThat(ofy().load().key(domain.getAutorenewBillingEvent()).now().getEventTime())
+    assertThat(tm().load(domain.getAutorenewBillingEvent()).getEventTime())
         .isEqualTo(newExpirationTime);
     assertAboutDomains()
         .that(domain)

@@ -46,7 +46,7 @@ import static google.registry.testing.TaskQueueHelper.assertTasksEnqueued;
 import static google.registry.util.DateTimeUtils.START_OF_TIME;
 import static org.joda.money.CurrencyUnit.USD;
 import static org.joda.time.Duration.standardSeconds;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
@@ -318,8 +318,7 @@ class DomainTransferRequestFlowTest
             BillingEvent.class),
         Sets.union(expectedServeApproveBillingEvents, extraBillingEvents));
     // The domain's autorenew billing event should still point to the losing client's event.
-    BillingEvent.Recurring domainAutorenewEvent =
-        ofy().load().key(domain.getAutorenewBillingEvent()).now();
+    BillingEvent.Recurring domainAutorenewEvent = tm().load(domain.getAutorenewBillingEvent());
     assertThat(domainAutorenewEvent.getClientId()).isEqualTo("TheRegistrar");
     assertThat(domainAutorenewEvent.getRecurrenceEndTime()).isEqualTo(implicitTransferTime);
     // The original grace periods should remain untouched.
@@ -333,6 +332,7 @@ class DomainTransferRequestFlowTest
           ImmutableMap.of(
               GracePeriod.create(
                   GracePeriodStatus.TRANSFER,
+                  domain.getRepoId(),
                   implicitTransferTime.plus(registry.getTransferGracePeriodLength()),
                   "NewRegistrar",
                   null),
@@ -446,12 +446,7 @@ class DomainTransferRequestFlowTest
         .hasLastEppUpdateTime(implicitTransferTime)
         .and()
         .hasLastEppUpdateClientId("NewRegistrar");
-    assertThat(
-            ofy()
-                .load()
-                .key(domainAfterAutomaticTransfer.getAutorenewBillingEvent())
-                .now()
-                .getEventTime())
+    assertThat(tm().load(domainAfterAutomaticTransfer.getAutorenewBillingEvent()).getEventTime())
         .isEqualTo(expectedExpirationTime);
     // And after the expected grace time, the grace period should be gone.
     DomainBase afterGracePeriod =
@@ -955,7 +950,7 @@ class DomainTransferRequestFlowTest
   void testSuccess_superuserExtension_zeroPeriod_autorenewGraceActive() throws Exception {
     eppRequestSource = EppRequestSource.TOOL;
     setupDomain("example", "tld");
-    Key<BillingEvent.Recurring> existingAutorenewEvent = domain.getAutorenewBillingEvent();
+    VKey<BillingEvent.Recurring> existingAutorenewEvent = domain.getAutorenewBillingEvent();
     // Set domain to have auto-renewed just before the transfer request, so that it will have an
     // active autorenew grace period spanning the entire transfer window.
     DateTime autorenewTime = clock.nowUtc().minusDays(1);
@@ -968,6 +963,7 @@ class DomainTransferRequestFlowTest
                 .addGracePeriod(
                     GracePeriod.createForRecurring(
                         GracePeriodStatus.AUTO_RENEW,
+                        domain.getRepoId(),
                         autorenewTime.plus(Registry.get("tld").getAutoRenewGracePeriodLength()),
                         "TheRegistrar",
                         existingAutorenewEvent))
@@ -1094,6 +1090,7 @@ class DomainTransferRequestFlowTest
                 .addGracePeriod(
                     GracePeriod.createForRecurring(
                         GracePeriodStatus.AUTO_RENEW,
+                        domain.getRepoId(),
                         autorenewTime.plus(Registry.get("tld").getAutoRenewGracePeriodLength()),
                         "TheRegistrar",
                         domain.getAutorenewBillingEvent()))
@@ -1110,7 +1107,7 @@ class DomainTransferRequestFlowTest
   @Test
   void testSuccess_autorenewGraceActive_throughoutTransferWindow() throws Exception {
     setupDomain("example", "tld");
-    Key<BillingEvent.Recurring> existingAutorenewEvent = domain.getAutorenewBillingEvent();
+    VKey<BillingEvent.Recurring> existingAutorenewEvent = domain.getAutorenewBillingEvent();
     // Set domain to have auto-renewed just before the transfer request, so that it will have an
     // active autorenew grace period spanning the entire transfer window.
     DateTime autorenewTime = clock.nowUtc().minusDays(1);
@@ -1123,6 +1120,7 @@ class DomainTransferRequestFlowTest
                 .addGracePeriod(
                     GracePeriod.createForRecurring(
                         GracePeriodStatus.AUTO_RENEW,
+                        domain.getRepoId(),
                         autorenewTime.plus(Registry.get("tld").getAutoRenewGracePeriodLength()),
                         "TheRegistrar",
                         existingAutorenewEvent))
@@ -1142,13 +1140,13 @@ class DomainTransferRequestFlowTest
             .setEventTime(clock.nowUtc().plus(Registry.get("tld").getAutomaticTransferLength()))
             .setBillingTime(autorenewTime.plus(Registry.get("tld").getAutoRenewGracePeriodLength()))
             // The cancellation should refer to the old autorenew billing event.
-            .setRecurringEventKey(VKey.from(existingAutorenewEvent)));
+            .setRecurringEventKey(existingAutorenewEvent));
   }
 
   @Test
   void testSuccess_autorenewGraceActive_onlyAtAutomaticTransferTime() throws Exception {
     setupDomain("example", "tld");
-    Key<BillingEvent.Recurring> existingAutorenewEvent = domain.getAutorenewBillingEvent();
+    VKey<BillingEvent.Recurring> existingAutorenewEvent = domain.getAutorenewBillingEvent();
     // Set domain to expire in 1 day, so that it will be in the autorenew grace period by the
     // automatic transfer time, even though it isn't yet.
     DateTime expirationTime = clock.nowUtc().plusDays(1);
@@ -1170,7 +1168,7 @@ class DomainTransferRequestFlowTest
             .setBillingTime(
                 expirationTime.plus(Registry.get("tld").getAutoRenewGracePeriodLength()))
             // The cancellation should refer to the old autorenew billing event.
-            .setRecurringEventKey(VKey.from(existingAutorenewEvent)));
+            .setRecurringEventKey(existingAutorenewEvent));
   }
 
   @Test

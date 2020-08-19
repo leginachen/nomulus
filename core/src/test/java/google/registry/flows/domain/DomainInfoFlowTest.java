@@ -27,7 +27,7 @@ import static google.registry.testing.DatastoreHelper.persistResource;
 import static google.registry.testing.EppExceptionSubject.assertAboutEppExceptions;
 import static google.registry.testing.TestDataHelper.updateSubstitutions;
 import static google.registry.util.DateTimeUtils.START_OF_TIME;
-import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableMap;
@@ -44,6 +44,7 @@ import google.registry.flows.domain.DomainFlowUtils.CurrencyUnitMismatchExceptio
 import google.registry.flows.domain.DomainFlowUtils.FeeChecksDontSupportPhasesException;
 import google.registry.flows.domain.DomainFlowUtils.RestoresAreAlwaysForOneYearException;
 import google.registry.flows.domain.DomainFlowUtils.TransfersAreAlwaysForOneYearException;
+import google.registry.model.billing.BillingEvent;
 import google.registry.model.billing.BillingEvent.Recurring;
 import google.registry.model.contact.ContactAuthInfo;
 import google.registry.model.contact.ContactResource;
@@ -59,7 +60,9 @@ import google.registry.model.eppcommon.StatusValue;
 import google.registry.model.host.HostResource;
 import google.registry.model.ofy.RequestCapturingAsyncDatastoreService;
 import google.registry.model.registry.Registry;
-import google.registry.testing.AppEngineRule;
+import google.registry.model.reporting.HistoryEntry;
+import google.registry.persistence.VKey;
+import google.registry.testing.AppEngineExtension;
 import org.joda.time.DateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -92,7 +95,7 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
     sessionMetadata.setClientId("NewRegistrar");
     clock.setTo(DateTime.parse("2005-03-03T22:00:00.000Z"));
     createTld("tld");
-    persistResource(AppEngineRule.makeRegistrar1().asBuilder().setClientId("ClientZ").build());
+    persistResource(AppEngineExtension.makeRegistrar1().asBuilder().setClientId("ClientZ").build());
   }
 
   private void persistTestEntities(String domainName, boolean inactive) {
@@ -305,7 +308,8 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
         domain
             .asBuilder()
             .addGracePeriod(
-                GracePeriod.create(gracePeriodStatus, clock.nowUtc().plusDays(1), "foo", null))
+                GracePeriod.create(
+                    gracePeriodStatus, domain.getRepoId(), clock.nowUtc().plusDays(1), "foo", null))
             .setCreationClientId("NewRegistrar")
             .setCreationTimeForTest(DateTime.parse("2003-11-26T22:00:00.0Z"))
             .setRegistrationExpirationTime(DateTime.parse("2005-11-26T22:00:00.0Z"))
@@ -324,6 +328,10 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
   @Test
   void testSuccess_autoRenewGracePeriod() throws Exception {
     persistTestEntities(false);
+    Key<HistoryEntry> historyEntry =
+        Key.create(domain.createVKey().getOfyKey(), HistoryEntry.class, 67890);
+    VKey<BillingEvent.Recurring> recurringVKey =
+        VKey.from(Key.create(historyEntry, Recurring.class, 12345));
     // Add an AUTO_RENEW grace period to the saved resource.
     persistResource(
         domain
@@ -331,9 +339,10 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
             .addGracePeriod(
                 GracePeriod.createForRecurring(
                     GracePeriodStatus.AUTO_RENEW,
+                    domain.getRepoId(),
                     clock.nowUtc().plusDays(1),
                     "foo",
-                    Key.create(Recurring.class, 12345)))
+                    recurringVKey))
             .build());
     doSuccessfulTest("domain_info_response_autorenewperiod.xml", false);
   }
@@ -348,7 +357,11 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
             .asBuilder()
             .addGracePeriod(
                 GracePeriod.create(
-                    GracePeriodStatus.REDEMPTION, clock.nowUtc().plusDays(1), "foo", null))
+                    GracePeriodStatus.REDEMPTION,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "foo",
+                    null))
             .setStatusValues(ImmutableSet.of(StatusValue.PENDING_DELETE))
             .build());
     doSuccessfulTest("domain_info_response_redemptionperiod.xml", false);
@@ -363,7 +376,11 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
             .asBuilder()
             .addGracePeriod(
                 GracePeriod.create(
-                    GracePeriodStatus.RENEW, clock.nowUtc().plusDays(1), "foo", null))
+                    GracePeriodStatus.RENEW,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "foo",
+                    null))
             .build());
     doSuccessfulTest("domain_info_response_renewperiod.xml", false);
   }
@@ -377,10 +394,18 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
             .asBuilder()
             .addGracePeriod(
                 GracePeriod.create(
-                    GracePeriodStatus.RENEW, clock.nowUtc().plusDays(1), "foo", null))
+                    GracePeriodStatus.RENEW,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "foo",
+                    null))
             .addGracePeriod(
                 GracePeriod.create(
-                    GracePeriodStatus.RENEW, clock.nowUtc().plusDays(2), "foo", null))
+                    GracePeriodStatus.RENEW,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(2),
+                    "foo",
+                    null))
             .build());
     doSuccessfulTest("domain_info_response_renewperiod.xml", false);
   }
@@ -394,7 +419,11 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
             .asBuilder()
             .addGracePeriod(
                 GracePeriod.create(
-                    GracePeriodStatus.TRANSFER, clock.nowUtc().plusDays(1), "foo", null))
+                    GracePeriodStatus.TRANSFER,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "foo",
+                    null))
             .build());
     doSuccessfulTest("domain_info_response_transferperiod.xml", false);
   }
@@ -417,10 +446,19 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
         domain
             .asBuilder()
             .addGracePeriod(
-                GracePeriod.create(GracePeriodStatus.ADD, clock.nowUtc().plusDays(1), "foo", null))
+                GracePeriod.create(
+                    GracePeriodStatus.ADD,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "foo",
+                    null))
             .addGracePeriod(
                 GracePeriod.create(
-                    GracePeriodStatus.RENEW, clock.nowUtc().plusDays(2), "foo", null))
+                    GracePeriodStatus.RENEW,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(2),
+                    "foo",
+                    null))
             .build());
     doSuccessfulTest("domain_info_response_stackedaddrenewperiod.xml", false);
   }
@@ -433,7 +471,12 @@ class DomainInfoFlowTest extends ResourceFlowTestCase<DomainInfoFlow, DomainBase
         domain
             .asBuilder()
             .addGracePeriod(
-                GracePeriod.create(GracePeriodStatus.ADD, clock.nowUtc().plusDays(1), "foo", null))
+                GracePeriod.create(
+                    GracePeriodStatus.ADD,
+                    domain.getRepoId(),
+                    clock.nowUtc().plusDays(1),
+                    "foo",
+                    null))
             .setDsData(
                 ImmutableSet.of(
                     DelegationSignerData.create(
