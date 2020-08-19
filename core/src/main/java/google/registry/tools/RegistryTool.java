@@ -33,7 +33,7 @@ public final class RegistryTool {
       new ImmutableMap.Builder<String, Class<? extends Command>>()
           .put("ack_poll_messages", AckPollMessagesCommand.class)
           .put("backfill_registry_locks", BackfillRegistryLocksCommand.class)
-          .put("backfill_spec11threatmatch", BackfillSpec11ThreatMatchCommand.class)
+          .put("backfill_spec11_threat_matches", BackfillSpec11ThreatMatchCommand.class)
           .put("canonicalize_labels", CanonicalizeLabelsCommand.class)
           .put("check_domain", CheckDomainCommand.class)
           .put("check_domain_claims", CheckDomainClaimsCommand.class)
